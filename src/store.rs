@@ -1,22 +1,39 @@
 use axum::{async_trait, http::StatusCode};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use serde_with::{serde_as, DurationSeconds};
 use thiserror::Error;
+use time::Duration;
 
 use crate::stores::mem::CycleError;
 
 pub type TaskKey = usize;
 
+fn default_duration() -> Duration {
+    Duration::new(60, 0)
+}
+
+#[serde_as]
 #[derive(Deserialize)]
 pub struct InsertTask {
     pub name: String,
+    pub payload: Option<Value>,
     #[serde(default = "Vec::new")]
     pub depends_on: Vec<TaskKey>,
+    #[serde_as(as = "DurationSeconds<i64>")]
+    #[serde(default = "default_duration")]
+    pub duration: Duration,
 }
 
+#[serde_as]
 #[derive(Clone, Serialize)]
 pub struct Task {
     pub id: TaskKey,
     pub name: String,
+    pub payload: Option<Value>,
+    pub depends_on: Vec<TaskKey>,
+    #[serde_as(as = "DurationSeconds<i64>")]
+    pub duration: Duration,
 }
 
 #[derive(Error, Debug)]

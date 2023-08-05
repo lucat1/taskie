@@ -95,7 +95,10 @@ impl Store for MemoryStore {
 
         let task = Task {
             id,
+            payload: insert_task.payload,
             name: insert_task.name,
+            duration: insert_task.duration,
+            depends_on: insert_task.depends_on.clone(),
         };
         self.tasks.insert(task.id, task.clone());
         if insert_task.depends_on.is_empty() {

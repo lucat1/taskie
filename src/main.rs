@@ -9,20 +9,21 @@ use eyre::Result;
 use tokio::sync::RwLock;
 
 use api::{ApiError, Json};
-use store::{InsertTask, Store};
+use store::{InsertTask, Store, Task};
 use stores::mem::MemoryStore;
 
 type Context = Arc<RwLock<dyn Store>>;
 
+#[axum_macros::debug_handler]
 async fn push(
     State(context): State<Context>,
     Json(task): Json<InsertTask>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<(StatusCode, Json<Task>), ApiError> {
     let name = task.name.to_owned();
     let mut context = context.write().await;
     let task = context.push(task).await?;
     tracing::info!(id = %task.id, %name, "Queued task");
-    Ok(StatusCode::OK)
+    Ok((StatusCode::OK, Json(task)))
 }
 
 #[tokio::main]

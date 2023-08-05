@@ -64,3 +64,13 @@ where
         Ok(Json(t))
     }
 }
+
+impl<T> IntoResponse for Json<T>
+where
+    T: Serialize,
+{
+    fn into_response(self) -> Response {
+        let Json(data) = self;
+        AxumJson(data).into_response()
+    }
+}
