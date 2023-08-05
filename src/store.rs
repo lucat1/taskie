@@ -2,6 +2,8 @@ use axum::{async_trait, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::stores::mem::CycleError;
+
 pub type TaskKey = usize;
 
 #[derive(Deserialize)]
@@ -22,7 +24,7 @@ pub enum PushError {
     #[error("Missing task to depend upon: {dependency:?}; it could be either non-existant or already finished")]
     MissingDependency { dependency: TaskKey },
     #[error("Adding a task with the given dependencies would create a dependency cycle")]
-    Cycle(#[from] daggy::WouldCycle<()>),
+    Cycle(#[from] CycleError),
 }
 
 impl PushError {

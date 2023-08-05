@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use axum::async_trait;
 use deadqueue::unlimited::Queue;
+use thiserror::Error;
 
 use crate::store::{InsertTask, PopError, PushError, Store, Task, TaskKey};
 
@@ -10,8 +11,19 @@ pub struct MemoryStore {
     tasks: HashMap<TaskKey, Task>,
 
     queue: Queue<TaskKey>,
-    edges: Vec<(TaskKey, TaskKey)>,
+    edges: HashMap<TaskKey, Vec<TaskKey>>,
 }
+
+#[derive(Error, Debug)]
+pub struct CycleError;
+
+impl std::fmt::Display for CycleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "A cycle in the DAG has been detected")
+    }
+}
+
+static EMPTY_VEC: [TaskKey; 0] = [];
 
 impl MemoryStore {
     pub fn new() -> Self {
@@ -20,14 +32,58 @@ impl MemoryStore {
             tasks: HashMap::new(),
 
             queue: Queue::new(),
-            edges: Vec::new(),
+            edges: HashMap::new(),
         }
     }
 
-    fn add_edge(&mut self, parent: TaskKey, child: TaskKey) {
-        let pair = (parent, child);
-        // TODO
-        // bfs to check for loops
+    fn get_edges(&self, node: &TaskKey) -> &[TaskKey] {
+        match self.edges.get(node) {
+            Some(v) => v,
+            None => &EMPTY_VEC,
+        }
+    }
+
+    fn add_edge(&mut self, parent: TaskKey, child: TaskKey) -> Result<(), CycleError> {
+        if !self.edges.contains_key(&parent) {
+            self.edges.insert(parent, Vec::new());
+        }
+        // Add the edge to the adjacency matrix
+        let parent_edges = self.edges.get_mut(&parent).unwrap();
+        parent_edges.push(child);
+
+        // Check for loops in the graph using topological ordering
+        let mut in_degree: HashMap<TaskKey, usize> =
+            self.tasks.iter().map(|(k, _)| (*k, 0)).collect();
+        for node in self.edges.keys() {
+            for dest in self.get_edges(node).iter() {
+                in_degree.insert(*dest, in_degree.get(dest).unwrap() + 1);
+            }
+        }
+
+        let mut queue = VecDeque::with_capacity(self.tasks.len());
+        for (node, in_deg) in in_degree.iter() {
+            if *in_deg == 0 {
+                queue.push_back(*node);
+            }
+        }
+
+        let mut count = queue.len();
+        while let Some(node) = queue.pop_front() {
+            for dest in self.get_edges(&node).iter() {
+                let updated = in_degree.get(dest).unwrap() - 1;
+                in_degree.insert(*dest, updated);
+                if updated == 0 {
+                    queue.push_back(*dest);
+                    count += 1;
+                }
+            }
+        }
+
+        if count != self.tasks.len() {
+            Err(CycleError)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -51,11 +107,11 @@ impl Store for MemoryStore {
                 if !self.tasks.contains_key(&parent) {
                     return Err(PushError::MissingDependency { dependency: parent });
                 }
-                self.dag.add_edge(task.id.into(), parent.into(), ())?;
+                self.add_edge(task.id, parent)?;
             }
         }
 
-        tracing::info!(dag = ?self.dag, "dag");
+        tracing::debug!(nodes = ?self.tasks.keys(), edges = ?self.edges, "Dependency after task insertion");
         Ok(task)
     }
 
