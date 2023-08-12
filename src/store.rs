@@ -3,14 +3,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{serde_as, DurationSeconds};
 use thiserror::Error;
-use time::Duration;
+use time::{serde::iso8601::option as iso8601_option, Duration, OffsetDateTime};
 
 use crate::stores::mem::CycleError;
 
 pub type TaskKey = usize;
+pub static DEFAULT_DURATION: Duration = Duration::new(5, 0);
 
 fn default_duration() -> Duration {
-    Duration::new(60, 0)
+    DEFAULT_DURATION
 }
 
 #[serde_as]
@@ -34,6 +35,18 @@ pub struct Task {
     pub depends_on: Vec<TaskKey>,
     #[serde_as(as = "DurationSeconds<i64>")]
     pub duration: Duration,
+    #[serde(with = "iso8601_option", skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<OffsetDateTime>,
+}
+
+#[derive(Error, Debug)]
+pub enum MonitorError {
+    #[error("Monitoring channel dropped")]
+    ChannelDropped,
+    #[error("Recevied a non executing task id for a timeout or complete signal: {}", .0)]
+    InvalidTask(TaskKey),
+    #[error("Could not cancel the timeout for task: {}", .0)]
+    CancelTimeout(TaskKey),
 }
 
 #[derive(Error, Debug)]
@@ -54,13 +67,34 @@ impl PushError {
 }
 
 #[derive(Error, Debug)]
-pub enum PopError {
-    #[error("Invalid task id to be popped")]
+pub enum CompleteError {
+    #[error("Invalid task id to be completed: {}", .0)]
     InvalidTaskId(TaskKey),
+    #[error("Communication with the store monitor failed")]
+    MonitorCommunication,
+}
+
+#[derive(Error, Debug)]
+pub enum PopError {
+    #[error("Invalid task id to be popped: {}", .0)]
+    InvalidTaskId(TaskKey),
+    #[error("Communication with the store monitor failed")]
+    MonitorCommunication,
+}
+
+impl PopError {
+    pub fn status(&self) -> StatusCode {
+        match self {
+            PopError::InvalidTaskId(_) => StatusCode::BAD_REQUEST,
+            PopError::MonitorCommunication => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }
 
 #[async_trait]
 pub trait Store: Send + Sync {
+    async fn monitor(&self) -> Result<(), MonitorError>;
     async fn push(&self, insert_task: InsertTask) -> Result<Task, PushError>;
+    async fn complete(&self, task_id: TaskKey) -> Result<(), CompleteError>;
     async fn pop(&self) -> Result<Task, PopError>;
 }

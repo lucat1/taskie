@@ -1,21 +1,41 @@
 use std::{
     collections::{HashMap, VecDeque},
+    sync::Arc,
     vec,
 };
 
 use axum::async_trait;
 use deadqueue::unlimited::Queue;
 use thiserror::Error;
-use tokio::sync::RwLock;
+use time::OffsetDateTime;
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot::{self as oneshot, Sender},
+    Mutex, RwLock,
+};
+use tokio::time::timeout;
 
-use crate::store::{InsertTask, PopError, PushError, Store, Task, TaskKey};
+use crate::store::{
+    CompleteError, InsertTask, MonitorError, PopError, PushError, Store, Task, TaskKey,
+};
+
+#[derive(Clone)]
+enum MonitorMessage {
+    Popped(Task),
+    Completed(TaskKey),
+    TimedOut(TaskKey),
+}
 
 pub struct MemoryStore {
     next_key: RwLock<TaskKey>,
     tasks: RwLock<HashMap<TaskKey, Task>>,
-
+    processing: RwLock<HashMap<TaskKey, (Task, Sender<()>)>>,
     queue: Queue<TaskKey>,
     edges: RwLock<HashMap<TaskKey, Vec<TaskKey>>>,
+    chan: (
+        UnboundedSender<MonitorMessage>,
+        Mutex<UnboundedReceiver<MonitorMessage>>,
+    ),
 }
 
 #[derive(Error, Debug)]
@@ -31,12 +51,15 @@ static EMPTY_VEC: Vec<TaskKey> = vec![];
 
 impl MemoryStore {
     pub fn new() -> Self {
+        let (tx, rx) = unbounded_channel();
+
         MemoryStore {
             next_key: RwLock::new(0 as TaskKey),
             tasks: RwLock::new(HashMap::new()),
-
+            processing: RwLock::new(HashMap::new()),
             queue: Queue::new(),
             edges: RwLock::new(HashMap::new()),
+            chan: (tx, Mutex::new(rx)),
         }
     }
 
@@ -101,6 +124,58 @@ impl MemoryStore {
 
 #[async_trait]
 impl Store for MemoryStore {
+    async fn monitor(&self) -> Result<(), MonitorError> {
+        let mut rx = self.chan.1.lock().await;
+        let tx = Arc::new(self.chan.0.clone());
+
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                MonitorMessage::Popped(task) => {
+                    // The task has been popped off of the queue and we have to set a
+                    // timeout to wait for when the task.
+                    let (ttx, rx) = oneshot::channel::<()>();
+                    {
+                        let mut processing = self.processing.write().await;
+                        processing.insert(task.id, (task.clone(), ttx));
+                    }
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        if let Err(_) = timeout(task.duration.unsigned_abs(), rx).await {
+                            if let Err(err) = tx.send(MonitorMessage::TimedOut(task.id)) {
+                                tracing::error!(id = %task.id, ?err, "Timeout task cannot communicate with store monitor");
+                            }
+                        }
+                    });
+                }
+                MonitorMessage::Completed(task_id) => {
+                    tracing::info!(id = %task_id, "Task execution complete");
+                    {
+                        let mut processing = self.processing.write().await;
+                        let (_, ttx) = processing
+                            .remove(&task_id)
+                            .ok_or(MonitorError::InvalidTask(task_id))?;
+                        ttx.send(())
+                            .map_err(|_| MonitorError::CancelTimeout(task_id))?;
+                    }
+                }
+                MonitorMessage::TimedOut(task_id) => {
+                    tracing::info!(id = %task_id, "Task execution timed out");
+                    {
+                        let mut processing = self.processing.write().await;
+                        let (task, _) = processing
+                            .remove(&task_id)
+                            .ok_or(MonitorError::InvalidTask(task_id))?;
+
+                        let mut tasks = self.tasks.write().await;
+                        tasks.insert(task_id, task);
+                        self.queue.push(task_id);
+                    }
+                }
+            }
+        }
+        Err(MonitorError::ChannelDropped)
+    }
+
     async fn push(&self, insert_task: InsertTask) -> Result<Task, PushError> {
         let mut next_key = self.next_key.write().await;
         let id = *next_key;
@@ -112,6 +187,7 @@ impl Store for MemoryStore {
             name: insert_task.name,
             duration: insert_task.duration,
             depends_on: insert_task.depends_on.clone(),
+            deadline: None,
         };
         let mut tasks = self.tasks.write().await;
         tasks.insert(task.id, task.clone());
@@ -133,9 +209,10 @@ impl Store for MemoryStore {
     }
 
     async fn pop(&self) -> Result<Task, PopError> {
+        let (tx, _) = &self.chan;
         let task_id = self.queue.pop().await;
         let mut tasks = self.tasks.write().await;
-        let task = tasks
+        let mut task = tasks
             .remove(&task_id)
             .ok_or(PopError::InvalidTaskId(task_id))?;
 
@@ -144,9 +221,26 @@ impl Store for MemoryStore {
         // but it is not necesasry, as any node that is on the queue does not
         // have any pending dependency.
         // So, instead we do:
-        let mut edges = self.edges.write().await;
+        let edges = self.edges.read().await;
         assert!(!edges.contains_key(&task_id));
 
+        task.deadline = Some(OffsetDateTime::now_utc() + task.duration);
+        tx.send(MonitorMessage::Popped(task.clone()))
+            .map_err(|_| PopError::MonitorCommunication)?;
+        Ok(task)
+    }
+
+    async fn complete(&self, task_id: TaskKey) -> Result<(), CompleteError> {
+        let processing = self.processing.read().await;
+        if !processing.contains_key(&task_id) {
+            return Err(CompleteError::InvalidTaskId(task_id));
+        }
+
+        let (tx, _) = &self.chan;
+        tx.send(MonitorMessage::Completed(task_id))
+            .map_err(|_| CompleteError::MonitorCommunication)?;
+
+        let mut edges = self.edges.write().await;
         // A vector for the tasks which become ready once the current one is popped
         let mut ready = vec![];
         for (node, node_edges) in edges.iter_mut() {
@@ -162,8 +256,6 @@ impl Store for MemoryStore {
             edges.remove(&node);
             self.queue.push(node);
         }
-
-        // TODO: check if there were tasks waiting on this and they now have 0 deps
-        Ok(task)
+        Ok(())
     }
 }

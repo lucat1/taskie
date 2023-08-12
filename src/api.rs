@@ -9,18 +9,21 @@ use axum::{
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
-use crate::store::{PopError, PushError};
+use crate::store::{CompleteError, PopError, PushError};
 
 #[derive(Error, Debug)]
 pub enum ApiError {
     #[error("Could not parse JSON input {}", .0.body_text())]
-    ParseError(#[from] JsonRejection),
+    Parse(#[from] JsonRejection),
 
-    #[error("")]
-    PushError(#[from] PushError),
+    #[error("Error while pushing a new task: {}", .0)]
+    Push(#[from] PushError),
 
-    #[error("")]
-    PopError(#[from] PopError),
+    #[error("Error while popping from the queue: {}", .0)]
+    Pop(#[from] PopError),
+
+    #[error("Error while setting a task as completed: {}", .0)]
+    Complete(#[from] CompleteError),
 }
 
 #[derive(Serialize)]
@@ -32,9 +35,10 @@ struct SerializedError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
-            ApiError::ParseError(err) => (err.status(), err.to_string()),
-            ApiError::PushError(err) => (err.status(), err.to_string()),
-            ApiError::PopError(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            ApiError::Parse(err) => (err.status(), err.to_string()),
+            ApiError::Push(err) => (err.status(), err.to_string()),
+            ApiError::Pop(err) => (err.status(), err.to_string()),
+            ApiError::Complete(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
         };
 
         let err = AxumJson(SerializedError {
