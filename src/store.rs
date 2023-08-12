@@ -56,11 +56,11 @@ impl PushError {
 #[derive(Error, Debug)]
 pub enum PopError {
     #[error("Invalid task id to be popped")]
-    InvalidID,
+    InvalidTaskId(TaskKey),
 }
 
 #[async_trait]
 pub trait Store: Send + Sync {
-    async fn push(&mut self, insert_task: InsertTask) -> Result<Task, PushError>;
-    async fn pop(&mut self) -> Result<Task, PopError>;
+    async fn push(&self, insert_task: InsertTask) -> Result<Task, PushError>;
+    async fn pop(&self) -> Result<Task, PopError>;
 }
