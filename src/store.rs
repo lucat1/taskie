@@ -56,12 +56,12 @@ impl TryFrom<taskie_structures::TaskKey> for TaskKey {
     type Error = KeyDecodeError;
 
     fn try_from(value: taskie_structures::TaskKey) -> Result<Self, Self::Error> {
-        Ok(KEY_GENERATOR
+        KEY_GENERATOR
             .get()
             .ok_or(KeyDecodeError::MissingGenerator)?
             .decode_string(&value)
-            .map(|u| TaskKey(u))
-            .ok_or(KeyDecodeError::InvalidKey(value))?)
+            .map(TaskKey)
+            .ok_or(KeyDecodeError::InvalidKey(value))
     }
 }
 
@@ -69,11 +69,11 @@ impl Conceal for TaskKey {
     type Concealed = String;
 
     fn conceal(self) -> Result<Self::Concealed, ConcealError> {
-        Ok(KEY_GENERATOR
+        KEY_GENERATOR
             .get()
             .ok_or(ConcealError::MissingGenerator)?
             .encode_string(self.0)
-            .ok_or(ConcealError::InvalidKey)?)
+            .ok_or(ConcealError::InvalidKey)
     }
 }
 

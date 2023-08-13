@@ -80,11 +80,7 @@ impl MemoryStore {
         tasks: &HashMap<TaskKey, Task>,
     ) -> Result<(), CycleError> {
         let mut edges = self.edges.write().await;
-        if !edges.contains_key(&parent) {
-            edges.insert(parent, Vec::new());
-        }
-        // Add the edge to the adjacency matrix
-        let parent_edges = edges.get_mut(&parent).unwrap();
+        let parent_edges = edges.entry(parent).or_insert_with(Vec::new);
         parent_edges.push(child);
 
         // Check for loops in the graph using topological ordering
@@ -141,7 +137,7 @@ impl Store for MemoryStore {
                     }
                     let tx = tx.clone();
                     tokio::spawn(async move {
-                        if let Err(_) = timeout(task.duration.unsigned_abs(), rx).await {
+                        if timeout(task.duration.unsigned_abs(), rx).await.is_err() {
                             if let Err(err) = tx.send(MonitorMessage::TimedOut(task.id)) {
                                 tracing::error!(id = %task.id, ?err, "Timeout task cannot communicate with store monitor");
                             }

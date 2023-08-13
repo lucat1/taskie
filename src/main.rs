@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
     let http_task = axum::Server::bind(&address).serve(app.into_make_service());
 
     try_join!(
-        monitor_task.map_err(|e| Into::<Report>::into(e)),
+        monitor_task.map_err(Into::<Report>::into),
         http_task.map_err(|e| e.into())
     )?
     .0?;
