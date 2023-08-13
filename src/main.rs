@@ -66,6 +66,9 @@ async fn main() -> Result<()> {
     .init();
 
     let seed = std::env::var("KEY_SEED").map_or(Ok(DEFAULT_KEY_SEED), |s| s.parse())?;
+    if seed == DEFAULT_KEY_SEED {
+        tracing::warn!(%seed, "Using default key seed. Please set it using the KEY_SEED environment variable");
+    }
     let min_length =
         std::env::var("KEY_MIN_LENGTH").map_or(Ok(DEFAULT_KEY_MIN_LENGTH), |s| s.parse())?;
     KEY_GENERATOR
