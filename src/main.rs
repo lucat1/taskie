@@ -11,8 +11,8 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
-use eyre::{Report, Result};
-use serde::Deserialize;
+use block_id::{Alphabet, BlockId};
+use eyre::{eyre, Report, Result};
 use tracing_subscriber::{
     filter::{EnvFilter, LevelFilter},
     fmt,
@@ -20,8 +20,12 @@ use tracing_subscriber::{
 };
 
 use api::{ApiError, Json};
-use store::{InsertTask, Store, Task, TaskKey};
+use store::{Conceal, Store, KEY_GENERATOR};
 use stores::mem::MemoryStore;
+use structures::{CompleteTask, Execution, InsertTask, Task};
+
+static DEFAULT_KEY_SEED: u128 = 220232566797978763445376627431768261475;
+static DEFAULT_KEY_MIN_LENGTH: u8 = 4;
 
 type Context = Arc<dyn Store>;
 
@@ -29,30 +33,25 @@ async fn push(
     State(context): State<Context>,
     Json(task): Json<InsertTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let name = task.name.to_owned();
-    let task = context.push(task).await?;
-    tracing::info!(id = %task.id, %name, "Queued task");
+    let task = context.push(task.try_into()?).await?.conceal()?;
+    tracing::info!(id = ?task.id, name = %task.name, "Queued task");
     Ok((StatusCode::OK, Json(task)))
 }
 
-async fn pop(State(context): State<Context>) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let task = context.pop().await?;
-    tracing::info!(id = %task.id, name = %task.name, "Dequeued task");
-    Ok((StatusCode::OK, Json(task)))
-}
-
-#[derive(Deserialize)]
-struct CompletePayload {
-    id: TaskKey,
+async fn pop(State(context): State<Context>) -> Result<(StatusCode, Json<Execution>), ApiError> {
+    let execution = context.pop().await?.conceal()?;
+    tracing::info!(id = ?execution.task.id, name = %execution.task.name, deadline = %execution.deadline, "Dequeued task");
+    Ok((StatusCode::OK, Json(execution)))
 }
 
 #[axum_macros::debug_handler]
 async fn complete(
     State(context): State<Context>,
-    Json(CompletePayload { id }): Json<CompletePayload>,
+    Json(CompleteTask { id }): Json<CompleteTask>,
 ) -> Result<StatusCode, ApiError> {
+    let id = id.try_into()?;
     context.complete(id).await?;
-    tracing::info!(%id, "Task completed");
+    tracing::info!(?id, "Task completed");
     Ok(StatusCode::OK)
 }
 
@@ -65,6 +64,13 @@ async fn main() -> Result<()> {
         tracing_builder.with(EnvFilter::default().add_directive(LevelFilter::INFO.into()))
     }
     .init();
+
+    let seed = std::env::var("KEY_SEED").map_or(Ok(DEFAULT_KEY_SEED), |s| s.parse())?;
+    let min_length =
+        std::env::var("KEY_MIN_LENGTH").map_or(Ok(DEFAULT_KEY_MIN_LENGTH), |s| s.parse())?;
+    KEY_GENERATOR
+        .set(BlockId::new(Alphabet::alphanumeric(), seed, min_length))
+        .map_err(|_| eyre!("OnceCell was already full"))?;
 
     let state: Context = Arc::new(MemoryStore::new());
     let app = Router::new()

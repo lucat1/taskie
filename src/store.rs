@@ -1,42 +1,156 @@
+use std::fmt;
+
 use axum::{async_trait, http::StatusCode};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use serde_with::{serde_as, DurationSeconds};
+use block_id::BlockId;
+use once_cell::sync::OnceCell;
 use thiserror::Error;
-use time::{serde::iso8601::option as iso8601_option, Duration, OffsetDateTime};
 
 use crate::stores::mem::CycleError;
 
-pub type TaskKey = usize;
-pub static DEFAULT_DURATION: Duration = Duration::new(5, 0);
+pub static KEY_GENERATOR: OnceCell<BlockId<char>> = OnceCell::new();
 
-fn default_duration() -> Duration {
-    DEFAULT_DURATION
+#[derive(Error, Debug)]
+pub enum ConcealError {
+    #[error("Missing key decoder/generator")]
+    MissingGenerator,
+    #[error("Encoding error")]
+    InvalidKey,
 }
 
-#[serde_as]
-#[derive(Deserialize)]
-pub struct InsertTask {
-    pub name: String,
-    pub payload: Option<Value>,
-    #[serde(default = "Vec::new")]
-    pub depends_on: Vec<TaskKey>,
-    #[serde_as(as = "DurationSeconds<i64>")]
-    #[serde(default = "default_duration")]
-    pub duration: Duration,
+impl ConcealError {
+    pub fn status(&self) -> StatusCode {
+        match self {
+            ConcealError::MissingGenerator => StatusCode::INTERNAL_SERVER_ERROR,
+            ConcealError::InvalidKey => StatusCode::BAD_REQUEST,
+        }
+    }
 }
 
-#[serde_as]
-#[derive(Clone, Serialize)]
-pub struct Task {
-    pub id: TaskKey,
-    pub name: String,
-    pub payload: Option<Value>,
-    pub depends_on: Vec<TaskKey>,
-    #[serde_as(as = "DurationSeconds<i64>")]
-    pub duration: Duration,
-    #[serde(with = "iso8601_option", skip_serializing_if = "Option::is_none")]
-    pub deadline: Option<OffsetDateTime>,
+pub trait Conceal {
+    type Concealed;
+
+    fn conceal(self) -> Result<Self::Concealed, ConcealError>;
+}
+
+#[derive(Error, Debug)]
+pub enum KeyDecodeError {
+    #[error("Missing key decoder/generator")]
+    MissingGenerator,
+    #[error("Invalid key: {}", .0)]
+    InvalidKey(String),
+}
+
+impl KeyDecodeError {
+    pub fn status(&self) -> StatusCode {
+        match self {
+            KeyDecodeError::MissingGenerator => StatusCode::INTERNAL_SERVER_ERROR,
+            KeyDecodeError::InvalidKey(_) => StatusCode::BAD_REQUEST,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TaskKey(pub u64);
+
+impl TryFrom<structures::TaskKey> for TaskKey {
+    type Error = KeyDecodeError;
+
+    fn try_from(value: structures::TaskKey) -> Result<Self, Self::Error> {
+        Ok(KEY_GENERATOR
+            .get()
+            .ok_or(KeyDecodeError::MissingGenerator)?
+            .decode_string(&value)
+            .map(|u| TaskKey(u))
+            .ok_or(KeyDecodeError::InvalidKey(value))?)
+    }
+}
+
+impl Conceal for TaskKey {
+    type Concealed = String;
+
+    fn conceal(self) -> Result<Self::Concealed, ConcealError> {
+        Ok(KEY_GENERATOR
+            .get()
+            .ok_or(ConcealError::MissingGenerator)?
+            .encode_string(self.0)
+            .ok_or(ConcealError::InvalidKey)?)
+    }
+}
+
+impl fmt::Display for TaskKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.conceal().unwrap_or("broken concealer".to_string())
+        )
+    }
+}
+
+impl fmt::Debug for TaskKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}({})",
+            self.0,
+            self.conceal().unwrap_or("broken concealer".to_string())
+        )
+    }
+}
+
+pub struct InsertTask(pub structures::InsertTask<TaskKey>);
+
+impl TryFrom<structures::InsertTask> for InsertTask {
+    type Error = KeyDecodeError;
+
+    fn try_from(value: structures::InsertTask) -> Result<Self, Self::Error> {
+        Ok(Self(structures::InsertTask {
+            name: value.name,
+            payload: value.payload,
+            duration: value.duration,
+            depends_on: value
+                .depends_on
+                .into_iter()
+                .map(|k| k.try_into())
+                .collect::<Result<Vec<TaskKey>, KeyDecodeError>>()?,
+        }))
+    }
+}
+
+#[derive(Clone)]
+pub struct Task(pub structures::Task<TaskKey>);
+
+impl Conceal for Task {
+    type Concealed = structures::Task;
+
+    fn conceal(self) -> Result<Self::Concealed, ConcealError> {
+        let Task(task) = self;
+        Ok(structures::Task {
+            id: task.id.conceal()?,
+            depends_on: task
+                .depends_on
+                .into_iter()
+                .map(|k| k.conceal())
+                .collect::<Result<Vec<structures::TaskKey>, ConcealError>>()?,
+            name: task.name,
+            duration: task.duration,
+            payload: task.payload,
+        })
+    }
+}
+
+pub struct Execution(pub structures::Execution<Task>);
+
+impl Conceal for Execution {
+    type Concealed = structures::Execution;
+
+    fn conceal(self) -> Result<Self::Concealed, ConcealError> {
+        let Execution(execution) = self;
+        Ok(structures::Execution {
+            task: execution.task.conceal()?,
+            deadline: execution.deadline,
+        })
+    }
 }
 
 #[derive(Error, Debug)]
@@ -51,7 +165,7 @@ pub enum MonitorError {
 
 #[derive(Error, Debug)]
 pub enum PushError {
-    #[error("Missing task to depend upon: {dependency:?}; it could be either non-existant or already finished")]
+    #[error("Missing task to depend upon: {dependency}; it could be either non-existant or already finished")]
     MissingDependency { dependency: TaskKey },
     #[error("Adding a task with the given dependencies would create a dependency cycle")]
     Cycle(#[from] CycleError),
@@ -96,5 +210,5 @@ pub trait Store: Send + Sync {
     async fn monitor(&self) -> Result<(), MonitorError>;
     async fn push(&self, insert_task: InsertTask) -> Result<Task, PushError>;
     async fn complete(&self, task_id: TaskKey) -> Result<(), CompleteError>;
-    async fn pop(&self) -> Result<Task, PopError>;
+    async fn pop(&self) -> Result<Execution, PopError>;
 }

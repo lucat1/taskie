@@ -16,7 +16,7 @@ use tokio::sync::{
 use tokio::time::timeout;
 
 use crate::store::{
-    CompleteError, InsertTask, MonitorError, PopError, PushError, Store, Task, TaskKey,
+    CompleteError, Execution, InsertTask, MonitorError, PopError, PushError, Store, Task, TaskKey,
 };
 
 #[derive(Clone)]
@@ -54,7 +54,7 @@ impl MemoryStore {
         let (tx, rx) = unbounded_channel();
 
         MemoryStore {
-            next_key: RwLock::new(0 as TaskKey),
+            next_key: RwLock::new(TaskKey(1)),
             tasks: RwLock::new(HashMap::new()),
             processing: RwLock::new(HashMap::new()),
             queue: Queue::new(),
@@ -131,12 +131,13 @@ impl Store for MemoryStore {
         while let Some(msg) = rx.recv().await {
             match msg {
                 MonitorMessage::Popped(task) => {
+                    let Task(task) = task;
                     // The task has been popped off of the queue and we have to set a
                     // timeout to wait for when the task.
                     let (ttx, rx) = oneshot::channel::<()>();
                     {
                         let mut processing = self.processing.write().await;
-                        processing.insert(task.id, (task.clone(), ttx));
+                        processing.insert(task.id, (Task(task.clone()), ttx));
                     }
                     let tx = tx.clone();
                     tokio::spawn(async move {
@@ -177,30 +178,30 @@ impl Store for MemoryStore {
     }
 
     async fn push(&self, insert_task: InsertTask) -> Result<Task, PushError> {
+        let InsertTask(insert_task) = insert_task;
         let mut next_key = self.next_key.write().await;
-        let id = *next_key;
-        *next_key += 1;
+        let TaskKey(id) = *next_key;
+        *next_key = TaskKey(id + 1);
 
-        let task = Task {
-            id,
+        let task = Task(structures::Task {
+            id: TaskKey(id),
             payload: insert_task.payload,
             name: insert_task.name,
             duration: insert_task.duration,
             depends_on: insert_task.depends_on.clone(),
-            deadline: None,
-        };
+        });
         let mut tasks = self.tasks.write().await;
-        tasks.insert(task.id, task.clone());
+        tasks.insert(TaskKey(id), task.clone());
         if insert_task.depends_on.is_empty() {
             // if the task doesn't have any dependencies, we can just enqueue
             // it, ready to be consumed by workers
-            self.queue.push(id);
+            self.queue.push(TaskKey(id));
         } else {
             for parent in insert_task.depends_on.into_iter() {
                 if !tasks.contains_key(&parent) {
                     return Err(PushError::MissingDependency { dependency: parent });
                 }
-                self.add_edge(task.id, parent, &tasks).await?;
+                self.add_edge(TaskKey(id), parent, &tasks).await?;
             }
         }
 
@@ -208,11 +209,11 @@ impl Store for MemoryStore {
         Ok(task)
     }
 
-    async fn pop(&self) -> Result<Task, PopError> {
+    async fn pop(&self) -> Result<Execution, PopError> {
         let (tx, _) = &self.chan;
         let task_id = self.queue.pop().await;
         let mut tasks = self.tasks.write().await;
-        let mut task = tasks
+        let task = tasks
             .remove(&task_id)
             .ok_or(PopError::InvalidTaskId(task_id))?;
 
@@ -224,10 +225,12 @@ impl Store for MemoryStore {
         let edges = self.edges.read().await;
         assert!(!edges.contains_key(&task_id));
 
-        task.deadline = Some(OffsetDateTime::now_utc() + task.duration);
         tx.send(MonitorMessage::Popped(task.clone()))
             .map_err(|_| PopError::MonitorCommunication)?;
-        Ok(task)
+        Ok(Execution(structures::Execution {
+            deadline: OffsetDateTime::now_utc() + task.0.duration,
+            task,
+        }))
     }
 
     async fn complete(&self, task_id: TaskKey) -> Result<(), CompleteError> {
