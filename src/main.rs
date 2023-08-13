@@ -22,7 +22,7 @@ use tracing_subscriber::{
 use api::{ApiError, Json};
 use store::{Conceal, Store, KEY_GENERATOR};
 use stores::mem::MemoryStore;
-use structures::{CompleteTask, Execution, InsertTask, Task};
+use taskie_structures::{CompleteTask, Execution, InsertTask, Task};
 
 static DEFAULT_KEY_SEED: u128 = 220232566797978763445376627431768261475;
 static DEFAULT_KEY_MIN_LENGTH: u8 = 4;

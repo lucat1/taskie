@@ -1055,16 +1055,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
-name = "structures"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "serde_with",
- "time",
-]
-
-[[package]]
 name = "syn"
 version = "2.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1096,12 +1086,26 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "structures",
+ "taskie-structures",
  "thiserror",
  "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "taskie-client"
+version = "0.1.0"
+
+[[package]]
+name = "taskie-structures"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_with",
+ "time",
 ]
 
 [[package]]

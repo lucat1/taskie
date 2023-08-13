@@ -52,10 +52,10 @@ impl KeyDecodeError {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskKey(pub u64);
 
-impl TryFrom<structures::TaskKey> for TaskKey {
+impl TryFrom<taskie_structures::TaskKey> for TaskKey {
     type Error = KeyDecodeError;
 
-    fn try_from(value: structures::TaskKey) -> Result<Self, Self::Error> {
+    fn try_from(value: taskie_structures::TaskKey) -> Result<Self, Self::Error> {
         Ok(KEY_GENERATOR
             .get()
             .ok_or(KeyDecodeError::MissingGenerator)?
@@ -98,13 +98,13 @@ impl fmt::Debug for TaskKey {
     }
 }
 
-pub struct InsertTask(pub structures::InsertTask<TaskKey>);
+pub struct InsertTask(pub taskie_structures::InsertTask<TaskKey>);
 
-impl TryFrom<structures::InsertTask> for InsertTask {
+impl TryFrom<taskie_structures::InsertTask> for InsertTask {
     type Error = KeyDecodeError;
 
-    fn try_from(value: structures::InsertTask) -> Result<Self, Self::Error> {
-        Ok(Self(structures::InsertTask {
+    fn try_from(value: taskie_structures::InsertTask) -> Result<Self, Self::Error> {
+        Ok(Self(taskie_structures::InsertTask {
             name: value.name,
             payload: value.payload,
             duration: value.duration,
@@ -118,20 +118,20 @@ impl TryFrom<structures::InsertTask> for InsertTask {
 }
 
 #[derive(Clone)]
-pub struct Task(pub structures::Task<TaskKey>);
+pub struct Task(pub taskie_structures::Task<TaskKey>);
 
 impl Conceal for Task {
-    type Concealed = structures::Task;
+    type Concealed = taskie_structures::Task;
 
     fn conceal(self) -> Result<Self::Concealed, ConcealError> {
         let Task(task) = self;
-        Ok(structures::Task {
+        Ok(taskie_structures::Task {
             id: task.id.conceal()?,
             depends_on: task
                 .depends_on
                 .into_iter()
                 .map(|k| k.conceal())
-                .collect::<Result<Vec<structures::TaskKey>, ConcealError>>()?,
+                .collect::<Result<Vec<taskie_structures::TaskKey>, ConcealError>>()?,
             name: task.name,
             duration: task.duration,
             payload: task.payload,
@@ -139,14 +139,14 @@ impl Conceal for Task {
     }
 }
 
-pub struct Execution(pub structures::Execution<Task>);
+pub struct Execution(pub taskie_structures::Execution<Task>);
 
 impl Conceal for Execution {
-    type Concealed = structures::Execution;
+    type Concealed = taskie_structures::Execution;
 
     fn conceal(self) -> Result<Self::Concealed, ConcealError> {
         let Execution(execution) = self;
-        Ok(structures::Execution {
+        Ok(taskie_structures::Execution {
             task: execution.task.conceal()?,
             deadline: execution.deadline,
         })

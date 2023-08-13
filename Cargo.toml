@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["structures"]
+members = ["structures", "client"]
 
 [dependencies]
-structures = { path = "structures" }
+taskie-structures = { path = "structures" }
 
 axum = "0.6.20"
 axum-macros = "0.3.8"

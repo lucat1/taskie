@@ -10,7 +10,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
 use crate::store::{CompleteError, ConcealError, KeyDecodeError, PopError, PushError};
-use structures::Error as SerializedError;
+use taskie_structures::Error as SerializedError;
 
 #[derive(Error, Debug)]
 pub enum ApiError {

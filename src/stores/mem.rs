@@ -183,7 +183,7 @@ impl Store for MemoryStore {
         let TaskKey(id) = *next_key;
         *next_key = TaskKey(id + 1);
 
-        let task = Task(structures::Task {
+        let task = Task(taskie_structures::Task {
             id: TaskKey(id),
             payload: insert_task.payload,
             name: insert_task.name,
@@ -227,7 +227,7 @@ impl Store for MemoryStore {
 
         tx.send(MonitorMessage::Popped(task.clone()))
             .map_err(|_| PopError::MonitorCommunication)?;
-        Ok(Execution(structures::Execution {
+        Ok(Execution(taskie_structures::Execution {
             deadline: OffsetDateTime::now_utc() + task.0.duration,
             task,
         }))
