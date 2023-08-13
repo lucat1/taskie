@@ -33,15 +33,15 @@ async fn push(
     State(context): State<Context>,
     Json(task): Json<InsertTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let task = context.push(task.try_into()?).await?.conceal()?;
-    tracing::info!(id = ?task.id, name = %task.name, "Queued task");
-    Ok((StatusCode::OK, Json(task)))
+    let task = context.push(task.try_into()?).await?;
+    tracing::info!(id = ?task.0.id, name = %task.0.name, "Queued task");
+    Ok((StatusCode::OK, Json(task.conceal()?)))
 }
 
 async fn pop(State(context): State<Context>) -> Result<(StatusCode, Json<Execution>), ApiError> {
-    let execution = context.pop().await?.conceal()?;
-    tracing::info!(id = ?execution.task.id, name = %execution.task.name, deadline = %execution.deadline, "Dequeued task");
-    Ok((StatusCode::OK, Json(execution)))
+    let execution = context.pop().await?;
+    tracing::info!(id = ?execution.0.task.0.id, name = %execution.0.task.0.name, deadline = %execution.0.deadline, "Dequeued task");
+    Ok((StatusCode::OK, Json(execution.conceal()?)))
 }
 
 #[axum_macros::debug_handler]
