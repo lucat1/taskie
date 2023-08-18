@@ -3,4 +3,18 @@ name = "taskie-client"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["reqwest/default"]
+default-tls = ["reqwest/default-tls"]
+native-tls-crate = ["reqwest/native-tls-crate"]
+tokio-native-tls = ["reqwest/tokio-native-tls"]
+http3 = ["reqwest/http3"]
+native-tls-vendored = ["reqwest/native-tls-vendored"]
+rustls-tls = ["reqwest/rustls-tls"]
+
 [dependencies]
+taskie-structures = { path = "../structures" }
+
+reqwest = { version = "0.11.18", features = ["json"] }
+thiserror = "1.0.44"
+url = "2.4.0"
