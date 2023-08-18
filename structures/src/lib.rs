@@ -10,6 +10,7 @@ pub struct Error {
 }
 
 pub type TaskKey = String;
+pub type TaskName = String;
 pub static DEFAULT_DURATION: Duration = Duration::new(30, 0);
 
 fn default_duration() -> Duration {
@@ -18,8 +19,8 @@ fn default_duration() -> Duration {
 
 #[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
-pub struct InsertTask<K = TaskKey> {
-    pub name: String,
+pub struct InsertTask<N = TaskName, K = TaskKey> {
+    pub name: N,
     pub payload: Option<Value>,
     #[serde(default = "Vec::new")]
     pub depends_on: Vec<K>,
@@ -30,9 +31,9 @@ pub struct InsertTask<K = TaskKey> {
 
 #[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Task<K = TaskKey> {
+pub struct Task<N = TaskName, K = TaskKey> {
     pub id: K,
-    pub name: String,
+    pub name: N,
     pub payload: Option<Value>,
     pub depends_on: Vec<K>,
     #[serde_as(as = "DurationSeconds<i64>")]
@@ -40,7 +41,7 @@ pub struct Task<K = TaskKey> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Execution<T = Task<TaskKey>> {
+pub struct Execution<T = Task<TaskName, TaskKey>> {
     pub task: T,
     #[serde(with = "iso8601")]
     pub deadline: OffsetDateTime,

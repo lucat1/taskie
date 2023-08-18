@@ -98,7 +98,7 @@ impl fmt::Debug for TaskKey {
     }
 }
 
-pub struct InsertTask(pub taskie_structures::InsertTask<TaskKey>);
+pub struct InsertTask(pub taskie_structures::InsertTask<taskie_structures::TaskName, TaskKey>);
 
 impl TryFrom<taskie_structures::InsertTask> for InsertTask {
     type Error = KeyDecodeError;
@@ -118,7 +118,7 @@ impl TryFrom<taskie_structures::InsertTask> for InsertTask {
 }
 
 #[derive(Clone)]
-pub struct Task(pub taskie_structures::Task<TaskKey>);
+pub struct Task(pub taskie_structures::Task<taskie_structures::TaskName, TaskKey>);
 
 impl Conceal for Task {
     type Concealed = taskie_structures::Task;
