@@ -1,7 +1,7 @@
 use reqwest::StatusCode;
 use thiserror::Error;
 
-use taskie_structures::{CompleteTask, Execution, TaskKey};
+pub use taskie_structures::*;
 
 pub struct Client {
     host: url::Url,
