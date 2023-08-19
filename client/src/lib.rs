@@ -17,7 +17,6 @@ pub enum ClientError {
     #[error("Request failed with status code: {}", .0)]
     Unsuccessful(StatusCode),
 }
-
 impl Client {
     pub fn new(host: url::Url) -> Self {
         Client {
@@ -26,7 +25,27 @@ impl Client {
         }
     }
 
-    pub async fn pop(&self) -> Result<Execution, ClientError> {
+    pub async fn push<N, K>(&self, task: &InsertTask<N>) -> Result<Task<N, K>, ClientError>
+    where
+        N: serde::Serialize + for<'a> serde::Deserialize<'a>,
+        K: for<'a> serde::Deserialize<'a>,
+    {
+        let push_url = self.host.join("/v1/push")?;
+        Ok(self
+            .client
+            .put(push_url.clone())
+            .json(task)
+            .send()
+            .await?
+            .json()
+            .await?)
+    }
+
+    pub async fn pop<N, K>(&self) -> Result<Execution<Task<N, K>>, ClientError>
+    where
+        N: for<'a> serde::Deserialize<'a>,
+        K: for<'a> serde::Deserialize<'a>,
+    {
         let pop_url = self.host.join("/v1/pop")?;
         loop {
             let response = self.client.get(pop_url.clone()).send().await;
@@ -41,7 +60,7 @@ impl Client {
         }
     }
 
-    pub async fn complete(&self, task_id: TaskKey) -> Result<(), ClientError> {
+    pub async fn complete<K: serde::Serialize>(&self, task_id: K) -> Result<(), ClientError> {
         let complete_url = self.host.join("/v1/complete")?;
         let response = self
             .client
