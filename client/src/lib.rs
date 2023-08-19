@@ -25,7 +25,7 @@ impl Client {
         }
     }
 
-    pub async fn push<N, K>(&self, task: &InsertTask<N>) -> Result<Task<N, K>, ClientError>
+    pub async fn push<N, K>(&self, task: &[InsertTask<N>]) -> Result<Vec<Task<N, K>>, ClientError>
     where
         N: serde::Serialize + for<'a> serde::Deserialize<'a>,
         K: for<'a> serde::Deserialize<'a>,

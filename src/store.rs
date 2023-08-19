@@ -98,6 +98,7 @@ impl fmt::Debug for TaskKey {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct InsertTask(pub taskie_structures::InsertTask<taskie_structures::TaskName, TaskKey>);
 
 impl TryFrom<taskie_structures::InsertTask> for InsertTask {
@@ -117,7 +118,7 @@ impl TryFrom<taskie_structures::InsertTask> for InsertTask {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Task(pub taskie_structures::Task<taskie_structures::TaskName, TaskKey>);
 
 impl Conceal for Task {
@@ -139,6 +140,7 @@ impl Conceal for Task {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Execution(pub taskie_structures::Execution<Task>);
 
 impl Conceal for Execution {
@@ -208,7 +210,7 @@ impl PopError {
 #[async_trait]
 pub trait Store: Send + Sync {
     async fn monitor(&self) -> Result<(), MonitorError>;
-    async fn push(&self, insert_task: InsertTask) -> Result<Task, PushError>;
+    async fn push(&self, insert_tasks: Vec<InsertTask>) -> Result<Vec<Task>, PushError>;
     async fn complete(&self, task_id: TaskKey) -> Result<(), CompleteError>;
     async fn pop(&self) -> Result<Execution, PopError>;
 }

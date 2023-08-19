@@ -20,9 +20,11 @@ use tracing_subscriber::{
 };
 
 use api::{ApiError, Json};
-use store::{Conceal, Store, KEY_GENERATOR};
+use store::{Conceal, KeyDecodeError, Store, KEY_GENERATOR};
 use stores::mem::MemoryStore;
 use taskie_structures::{CompleteTask, Execution, InsertTask, Task};
+
+use crate::store::ConcealError;
 
 static DEFAULT_KEY_SEED: u128 = 220232566797978763445376627431768261475;
 static DEFAULT_KEY_MIN_LENGTH: u8 = 4;
@@ -31,11 +33,23 @@ type Context = Arc<dyn Store>;
 
 async fn push(
     State(context): State<Context>,
-    Json(task): Json<InsertTask>,
-) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let task = context.push(task.try_into()?).await?;
-    tracing::info!(id = ?task.0.id, name = %task.0.name, "Queued task");
-    Ok((StatusCode::OK, Json(task.conceal()?)))
+    Json(tasks): Json<Vec<InsertTask>>,
+) -> Result<(StatusCode, Json<Vec<Task>>), ApiError> {
+    let tasks = tasks
+        .into_iter()
+        .map(|task| task.try_into())
+        .collect::<Result<Vec<_>, KeyDecodeError>>()?;
+    let tasks = context.push(tasks).await?;
+    tracing::info!(
+        ids = ?tasks.iter().map(|t| t.0.id).collect::<Vec<_>>(),
+        names = ?tasks.iter().map(|t| t.0.name.to_owned()).collect::<Vec<_>>(),
+        "Queued tasks"
+    );
+    let tasks = tasks
+        .into_iter()
+        .map(|task| task.conceal())
+        .collect::<Result<Vec<_>, ConcealError>>()?;
+    Ok((StatusCode::OK, Json(tasks)))
 }
 
 async fn pop(State(context): State<Context>) -> Result<(StatusCode, Json<Execution>), ApiError> {

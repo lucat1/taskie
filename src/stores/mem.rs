@@ -173,36 +173,40 @@ impl Store for MemoryStore {
         Err(MonitorError::ChannelDropped)
     }
 
-    async fn push(&self, insert_task: InsertTask) -> Result<Task, PushError> {
-        let InsertTask(insert_task) = insert_task;
-        let mut next_key = self.next_key.write().await;
-        let TaskKey(id) = *next_key;
-        *next_key = TaskKey(id + 1);
+    async fn push(&self, insert_tasks: Vec<InsertTask>) -> Result<Vec<Task>, PushError> {
+        let mut result = Vec::with_capacity(insert_tasks.len());
+        for insert_task in insert_tasks.into_iter() {
+            let InsertTask(insert_task) = insert_task;
+            let mut next_key = self.next_key.write().await;
+            let TaskKey(id) = *next_key;
+            *next_key = TaskKey(id + 1);
 
-        let task = Task(taskie_structures::Task {
-            id: TaskKey(id),
-            payload: insert_task.payload,
-            name: insert_task.name,
-            duration: insert_task.duration,
-            depends_on: insert_task.depends_on.clone(),
-        });
-        let mut tasks = self.tasks.write().await;
-        tasks.insert(TaskKey(id), task.clone());
-        if insert_task.depends_on.is_empty() {
-            // if the task doesn't have any dependencies, we can just enqueue
-            // it, ready to be consumed by workers
-            self.queue.push(TaskKey(id));
-        } else {
-            for parent in insert_task.depends_on.into_iter() {
-                if !tasks.contains_key(&parent) {
-                    return Err(PushError::MissingDependency { dependency: parent });
+            let task = Task(taskie_structures::Task {
+                id: TaskKey(id),
+                payload: insert_task.payload,
+                name: insert_task.name,
+                duration: insert_task.duration,
+                depends_on: insert_task.depends_on.clone(),
+            });
+            let mut tasks = self.tasks.write().await;
+            tasks.insert(TaskKey(id), task.clone());
+            if insert_task.depends_on.is_empty() {
+                // if the task doesn't have any dependencies, we can just enqueue
+                // it, ready to be consumed by workers
+                self.queue.push(TaskKey(id));
+            } else {
+                for parent in insert_task.depends_on.into_iter() {
+                    if !tasks.contains_key(&parent) {
+                        return Err(PushError::MissingDependency { dependency: parent });
+                    }
+                    self.add_edge(TaskKey(id), parent, &tasks).await?;
                 }
-                self.add_edge(TaskKey(id), parent, &tasks).await?;
             }
-        }
 
-        tracing::debug!(nodes = ?tasks.keys(), edges = ?self.edges, "Dependency after task insertion");
-        Ok(task)
+            tracing::debug!(nodes = ?tasks.keys(), edges = ?self.edges, "Dependency after task insertion");
+            result.push(task);
+        }
+        Ok(result)
     }
 
     async fn pop(&self) -> Result<Execution, PopError> {
