@@ -12,7 +12,7 @@ pub struct Client {
 pub enum ClientError {
     #[error("Could not build the url for the action from the host parameter")]
     ParseUrl(#[from] url::ParseError),
-    #[error("Error while sending HTTP request")]
+    #[error("Error while sending HTTP request: {}", .0)]
     Request(#[from] reqwest::Error),
     #[error("Request failed with status code: {}", .0)]
     Unsuccessful(StatusCode),
