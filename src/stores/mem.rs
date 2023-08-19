@@ -29,7 +29,7 @@ enum MonitorMessage {
 pub struct MemoryStore {
     next_key: RwLock<TaskKey>,
     tasks: RwLock<HashMap<TaskKey, Task>>,
-    processing: RwLock<HashMap<TaskKey, (Task, Sender<()>)>>,
+    processing: RwLock<HashMap<TaskKey, Sender<()>>>,
     queue: Queue<TaskKey>,
     edges: RwLock<HashMap<TaskKey, Vec<TaskKey>>>,
     chan: (
@@ -129,11 +129,11 @@ impl Store for MemoryStore {
                 MonitorMessage::Popped(task) => {
                     let Task(task) = task;
                     // The task has been popped off of the queue and we have to set a
-                    // timeout to wait for when the task.
+                    // timeout to wait for, if the task does not get completed in time.
                     let (ttx, rx) = oneshot::channel::<()>();
                     {
                         let mut processing = self.processing.write().await;
-                        processing.insert(task.id, (Task(task.clone()), ttx));
+                        processing.insert(task.id, ttx);
                     }
                     let tx = tx.clone();
                     tokio::spawn(async move {
@@ -148,23 +148,25 @@ impl Store for MemoryStore {
                     tracing::info!(id = %task_id, "Task execution complete");
                     {
                         let mut processing = self.processing.write().await;
-                        let (_, ttx) = processing
+                        let ttx = processing
                             .remove(&task_id)
                             .ok_or(MonitorError::InvalidTask(task_id))?;
                         ttx.send(())
                             .map_err(|_| MonitorError::CancelTimeout(task_id))?;
+                        let mut tasks = self.tasks.write().await;
+                        tasks
+                            .remove(&task_id)
+                            .ok_or(MonitorError::InvalidTask(task_id))?;
                     }
                 }
                 MonitorMessage::TimedOut(task_id) => {
                     tracing::info!(id = %task_id, "Task execution timed out");
                     {
                         let mut processing = self.processing.write().await;
-                        let (task, _) = processing
+                        processing
                             .remove(&task_id)
                             .ok_or(MonitorError::InvalidTask(task_id))?;
 
-                        let mut tasks = self.tasks.write().await;
-                        tasks.insert(task_id, task);
                         self.queue.push(task_id);
                     }
                 }
@@ -212,9 +214,9 @@ impl Store for MemoryStore {
     async fn pop(&self) -> Result<Execution, PopError> {
         let (tx, _) = &self.chan;
         let task_id = self.queue.pop().await;
-        let mut tasks = self.tasks.write().await;
+        let tasks = self.tasks.read().await;
         let task = tasks
-            .remove(&task_id)
+            .get(&task_id)
             .ok_or(PopError::InvalidTaskId(task_id))?;
 
         // We should also do
@@ -229,7 +231,7 @@ impl Store for MemoryStore {
             .map_err(|_| PopError::MonitorCommunication)?;
         Ok(Execution(taskie_structures::Execution {
             deadline: OffsetDateTime::now_utc() + task.0.duration,
-            task,
+            task: task.clone(),
         }))
     }
 
