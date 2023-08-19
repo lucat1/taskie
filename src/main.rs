@@ -41,8 +41,7 @@ async fn push(
         .collect::<Result<Vec<_>, KeyDecodeError>>()?;
     let tasks = context.push(tasks).await?;
     tracing::info!(
-        ids = ?tasks.iter().map(|t| t.0.id).collect::<Vec<_>>(),
-        names = ?tasks.iter().map(|t| t.0.name.to_owned()).collect::<Vec<_>>(),
+        tasks = ?tasks.iter().map(|t| (t.0.id, t.0.name.to_owned())).collect::<Vec<_>>(),
         "Queued tasks"
     );
     let tasks = tasks
