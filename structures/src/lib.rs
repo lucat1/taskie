@@ -18,7 +18,7 @@ fn default_duration() -> Duration {
 }
 
 #[serde_as]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InsertTask<N = TaskName, K = TaskKey> {
     pub name: N,
     pub payload: Option<Value>,
@@ -30,7 +30,7 @@ pub struct InsertTask<N = TaskName, K = TaskKey> {
 }
 
 #[serde_as]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task<N = TaskName, K = TaskKey> {
     pub id: K,
     pub name: N,
@@ -40,14 +40,14 @@ pub struct Task<N = TaskName, K = TaskKey> {
     pub duration: Duration,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Execution<T = Task<TaskName, TaskKey>> {
     pub task: T,
     #[serde(with = "iso8601")]
     pub deadline: OffsetDateTime,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompleteTask<K = TaskKey> {
     pub id: K,
 }
