@@ -2,7 +2,7 @@ steps:
   build:
     image: "ghcr.io/rust-cross/rust-musl-cross:${IMAGE}"
     commands:
-      - cargo build --package server --release --target=${PLATFORM}
+      - cargo build --release --target=${PLATFORM}
       - musl-strip target/${PLATFORM}/release/taskie
       - mv target/${PLATFORM}/release/taskie target/taskie-${ARCH}
   deploy:
