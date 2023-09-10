@@ -1,0 +1,35 @@
+pipeline:
+  build:
+    image: "ghcr.io/rust-cross/rust-musl-cross:${IMAGE}"
+    commands:
+      - cargo build --package server --release --target=${PLATFORM}
+      - musl-strip target/${PLATFORM}/release/taskie
+      - mv target/${PLATFORM}/release/taskie target/taskie-${ARCH}
+  deploy:
+    image: plugins/gitea-release
+    settings:
+      api_key:
+        from_secret: codeberg_token
+      base_url: https://codeberg.org
+      files: target/taskie-${ARCH}
+
+matrix:
+  include:
+    - PLATFORM: aarch64-unknown-linux-musl
+      IMAGE: aarch64-musl
+      ARCH: aarch64
+    # - PLATFORM: i686-unknown-linux-musl
+    #   IMAGE: i686-musl
+    #   ARCH: i686
+    - PLATFORM: x86_64-unknown-linux-musl
+      IMAGE: x86_64-musl
+      ARCH: x86_64
+    # - x86_64-apple-darwin
+    # - x86_64-pc-windows-gnu
+
+depends_on:
+  - lint
+
+when:
+  event: tag
+  branches: main
